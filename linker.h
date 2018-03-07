@@ -6,11 +6,24 @@
 #include "elf.h"
 #include "exec_elf.h"
 #include "Utils.h"
+#include "auxvec.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <sys/stat.h>
+#include <dlfcn.h>
+#include <pthread.h>
+#include <jni.h>
+#include <sys/mman.h>
+#include <sys/atomics.h>
+#include "public.h"
 #undef PAGE_MASK
 #undef PAGE_SIZE
 #define PAGE_SIZE 4096
 #define PAGE_MASK 4095
-
 void debugger_init();
 const char *addr_to_name(unsigned addr);
 
@@ -36,11 +49,6 @@ struct dl_phdr_info
 
 
 // Values for r_debug->state
-enum {
-    RT_CONSISTENT,
-    RT_ADD,
-    RT_DELETE
-};
 
 struct r_debug
 {
@@ -53,12 +61,7 @@ struct r_debug
 
 typedef struct soinfo soinfo;
 
-#define FLAG_LINKED     0x00000001
-#define FLAG_ERROR      0x00000002
-#define FLAG_EXE        0x00000004 // The main executable
-#define FLAG_LINKER     0x00000010 // The linker itself
 
-#define SOINFO_NAME_LEN 128
 
 struct soinfo
 {
@@ -125,53 +128,7 @@ struct soinfo
 
 extern soinfo libdl_info;
 
-#ifdef ANDROID_ARM_LINKER
 
-#define R_ARM_COPY       20
-#define R_ARM_GLOB_DAT   21
-#define R_ARM_JUMP_SLOT  22
-#define R_ARM_RELATIVE   23
-
-/* According to the AAPCS specification, we only
- * need the above relocations. However, in practice,
- * the following ones turn up from time to time.
- */
-#define R_ARM_ABS32      2
-#define R_ARM_REL32      3
-
-#elif defined(ANDROID_X86_LINKER)
-
-#define R_386_32         1
-#define R_386_PC32       2
-#define R_386_GLOB_DAT   6
-#define R_386_JUMP_SLOT  7
-#define R_386_RELATIVE   8
-
-#endif
-
-#ifndef DT_INIT_ARRAY
-#define DT_INIT_ARRAY      25
-#endif
-
-#ifndef DT_FINI_ARRAY
-#define DT_FINI_ARRAY      26
-#endif
-
-#ifndef DT_INIT_ARRAYSZ
-#define DT_INIT_ARRAYSZ    27
-#endif
-
-#ifndef DT_FINI_ARRAYSZ
-#define DT_FINI_ARRAYSZ    28
-#endif
-
-#ifndef DT_PREINIT_ARRAY
-#define DT_PREINIT_ARRAY   32
-#endif
-
-#ifndef DT_PREINIT_ARRAYSZ
-#define DT_PREINIT_ARRAYSZ 33
-#endif
 
 soinfo *find_library(const char *name);
 unsigned unload_library(soinfo *si);
@@ -179,7 +136,7 @@ Elf32_Sym *lookup_in_library(soinfo *si, const char *name);
 Elf32_Sym *lookup(const char *name, soinfo **found, soinfo *start);
 soinfo *find_containing_library(const void *addr);
 Elf32_Sym *find_containing_symbol(const void *addr, soinfo *si);
-const char *linker_get_error(void);
+
 void call_constructors_recursive(soinfo *si);
 
 #ifdef ANDROID_ARM_LINKER

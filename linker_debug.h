@@ -8,16 +8,9 @@
 
 #ifndef _LINKER_DEBUG_H_
 #define _LINKER_DEBUG_H_
-
 #include <stdio.h>
 #include <android/log.h>
-#ifndef LINKER_DEBUG
-#error LINKER_DEBUG should be defined to either 1 or 0 in Android.mk
-#endif
 #define LOG_TAG "liumeng"
-/* set LINKER_DEBUG_TO_LOG to 1 to send the logs to logcat,
- * or 0 to use stdout instead.
- */
 #define LINKER_DEBUG_TO_LOG  1
 #define TRACE_DEBUG          1
 #define DO_TRACE_LOOKUP      1
@@ -26,102 +19,48 @@
 #define STATS                0
 #define COUNT_PAGES          0
 
-/*********************************************************************
- * You shouldn't need to modify anything below unless you are adding
- * more debugging information.
- *
- * To enable/disable specific debug options, change the defines above
- *********************************************************************/
 
-
-/*********************************************************************/
 #undef TRUE
 #undef FALSE
 #define TRUE                 1
 #define FALSE                0
 
-/* Only use printf() during debugging.  We have seen occasional memory
- * corruption when the linker uses printf().
- */
-#if LINKER_DEBUG
 #include "linker_format.h"
 extern int debug_verbosity;
-#if LINKER_DEBUG_TO_LOG
 extern int format_log(int, const char *, const char *, ...);
-#define _PRINTVF(v,f,x...)                                        \
-do {                                                          \
-if (debug_verbosity > (v)) format_log(5-(v),"linker",x);  \
-} while (0)
-#else /* !LINKER_DEBUG_TO_LOG */
 extern int format_fd(int, const char *, ...);
-#define _PRINTVF(v,f,x...)                           \
-do {                                             \
-if (debug_verbosity > (v)) format_fd(1, x);  \
-} while (0)
-#endif /* !LINKER_DEBUG_TO_LOG */
-#else /* !LINKER_DEBUG */
+#define DL_INFO(fmt, args...)  \
+ __android_log_print(ANDROID_LOG_ERROR,LOG_TAG,fmt, ##args)
+#define DL_ERR(fmt, args...)    \
+ __android_log_print(ANDROID_LOG_ERROR,LOG_TAG,fmt, ##args)
 #define _PRINTVF(v,f,x...)   do {} while(0)
-#endif /* LINKER_DEBUG */
-
-#define PRINT(fmt,args...)         __android_log_print(ANDROID_LOG_ERROR,LOG_TAG,fmt, ##args)
-#define INFO(fmt,args...)           __android_log_print(ANDROID_LOG_ERROR,LOG_TAG,fmt, ##args)
-#define TRACE(fmt,args...)         __android_log_print(ANDROID_LOG_ERROR,LOG_TAG,fmt, ##args)
+#define PRINT(fmt,args...)   \
+ __android_log_print(ANDROID_LOG_ERROR,LOG_TAG,fmt, ##args)
+#define INFO(fmt,args...)    \
+ __android_log_print(ANDROID_LOG_ERROR,LOG_TAG,fmt, ##args)
+#define TRACE(fmt,args...)   \
+ __android_log_print(ANDROID_LOG_ERROR,LOG_TAG,fmt, ##args)
 #define WARN(fmt,args...)    \
-__android_log_print(ANDROID_LOG_ERROR,LOG_TAG,fmt, ##args)
-// _PRINTVF(-1, TRUE, "%s:%d| WARNING: " fmt, __FILE__, __LINE__, ## args)
+ __android_log_print(ANDROID_LOG_ERROR,LOG_TAG,fmt, ##args)
 #define ERROR(fmt,args...)    \
-__android_log_print(ANDROID_LOG_ERROR,LOG_TAG,fmt, ##args)
-// _PRINTVF(-1, TRUE, "%s:%d| ERROR: " fmt, __FILE__, __LINE__, ## args)
-
-
-#if TRACE_DEBUG
-#define DEBUG(fmt,args...)          __android_log_print(ANDROID_LOG_ERROR,LOG_TAG,fmt, ##args)
-#else /* !TRACE_DEBUG */
-#define DEBUG(fmt,args...)          __android_log_print(ANDROID_LOG_ERROR,LOG_TAG,fmt, ##args)
-#endif /* TRACE_DEBUG */
-
-#if LINKER_DEBUG
-#define TRACE_TYPE(t,x...)   do { if (DO_TRACE_##t) { TRACE(x); } } while (0)
-#else  /* !LINKER_DEBUG */
-#define TRACE_TYPE(t,x...)   do {} while (0)
-#endif /* LINKER_DEBUG */
-
-#if STATS
+ __android_log_print(ANDROID_LOG_ERROR,LOG_TAG,fmt, ##args)
+#define DEBUG(fmt,args...)   \
+ __android_log_print(ANDROID_LOG_ERROR,LOG_TAG,fmt, ##args)
+#define TEMP_FAILURE_RETRY(exp) ({         \
+typeof (exp) _rc;                      \
+do {                                   \
+_rc = (exp);                       \
+} while (_rc == -1 && errno == EINTR); \
+_rc; })
 #define RELOC_ABSOLUTE        0
 #define RELOC_RELATIVE        1
 #define RELOC_COPY            2
 #define RELOC_SYMBOL          3
 #define NUM_RELOC_STATS       4
-
 struct _link_stats {
     int reloc[NUM_RELOC_STATS];
 };
 extern struct _link_stats linker_stats;
-
-#define COUNT_RELOC(type)                                 \
-do { if (type >= 0 && type < NUM_RELOC_STATS) {   \
-linker_stats.reloc[type] += 1;            \
-} else  {                                    \
-PRINT("Unknown reloc stat requested\n");  \
-}                                            \
-} while(0)
-#else /* !STATS */
-#define COUNT_RELOC(type)     do {} while(0)
-#endif /* STATS */
-
-#if TIMING
-#undef WARN
-#define WARN(x...)           do {} while (0)
-#endif /* TIMING */
-
-#if COUNT_PAGES
-extern unsigned bitmask[];
-#define MARK(offset)         do {                                        \
-bitmask[((offset) >> 12) >> 3] |= (1 << (((offset) >> 12) & 7)); \
-} while(0)
-#else
-#define MARK(x)              do {} while (0)
-#endif
 
 #define DEBUG_DUMP_PHDR(phdr, name, pid) do { \
 DEBUG("%5d %s (phdr = 0x%08x)\n", (pid), (name), (unsigned)(phdr));   \

@@ -1,21 +1,6 @@
-#include "auxvec.h"
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <sys/stat.h>
-#include <dlfcn.h>
-#include <pthread.h>
-#include <jni.h>
-#include <sys/mman.h>
-#include <sys/atomics.h>
-#include "gbdlfcn.h"
 #include "linker.h"
 #include "linker_debug.h"
 #include "linker_format.h"
-
 #define ALLOW_SYMBOLS_FROM_MAIN 1
 #define SO_MAX 128
 
@@ -27,12 +12,7 @@
 #define LDPRELOAD_MAX 8
 
 #define LOG_TAG "liumeng"
-#define DL_ERR(fmt, x...)                                                     \
-    do {                                                                      \
-        format_buffer(__linker_dl_err_buf, sizeof(__linker_dl_err_buf),            \
-                 "%s[%d]: " fmt, __func__, __LINE__, ##x);                    \
-        ERROR(fmt "\n", ##x);                                                      \
-    } while(0)
+
 static int link_image(soinfo *si, unsigned wr_offset);
 
 static int socount = 0;
@@ -91,13 +71,6 @@ HOODLUM(free, void, (void *ptr));
 HOODLUM(realloc, void *, (void *ptr, size_t size));
 HOODLUM(calloc, void *, (size_t cnt, size_t size));
 
-static char tmp_err_buf[768];
-static char __linker_dl_err_buf[768];
-
-const char *linker_get_error(void)
-{
-    return (const char *)&__linker_dl_err_buf[0];
-}
 
 /*
  * This function is an empty stub where GDB locates a breakpoint to get notified
@@ -323,7 +296,7 @@ static Elf32_Sym *_elf_lookup(soinfo *si, unsigned hash, const char *name)
     const char *strtab = si->strtab;
     unsigned n;
     
-    TRACE_TYPE(LOOKUP, "%5d SEARCH %s in %s@0x%08x %08x %d\n", pid,
+    DL_ERR("%5d SEARCH %s in %s@0x%08x %08x %d\n", pid,
                name, si->name, si->base, hash, hash % si->nbucket);
     n = hash % si->nbucket;
     
@@ -338,7 +311,7 @@ static Elf32_Sym *_elf_lookup(soinfo *si, unsigned hash, const char *name)
                 /* no section == undefined */
                 if(s->st_shndx == 0) continue;
                 
-                TRACE_TYPE(LOOKUP, "%5d FOUND %s in %s (%08x) %d\n", pid,
+                DL_ERR("%5d FOUND %s in %s (%08x) %d\n", pid,
                            name, si->name, s->st_value, s->st_size);
                 return s;
         }
@@ -424,7 +397,7 @@ _do_lookup(soinfo *si, const char *name, unsigned *base)
     
 done:
     if(s != NULL) {
-        TRACE_TYPE(LOOKUP, "%5d si %s sym %s s->st_value = 0x%08x, "
+        DL_ERR("%5d si %s sym %s s->st_value = 0x%08x, "
                    "found in %s, base = 0x%08x\n",
                    pid, si->name, name, s->st_value, lsi->name, lsi->base);
         *base = lsi->base;
@@ -466,7 +439,7 @@ Elf32_Sym *lookup(const char *name, soinfo **found, soinfo *start)
     }
     
     if(s != NULL) {
-        TRACE_TYPE(LOOKUP, "%5d %s s->st_value = 0x%08x, "
+        DL_ERR("%5d %s s->st_value = 0x%08x, "
                    "si->base = 0x%08x\n", pid, name, s->st_value, si->base);
         return s;
     }
@@ -509,60 +482,6 @@ Elf32_Sym *find_containing_symbol(const void *addr, soinfo *si)
 }
 
 
-static const char *sopaths[] = {
-    "/vendor/lib",
-    "/system/lib",
-    0
-};
-
-static int _open_lib(const char *name)
-{
-    int fd;
-    struct stat filestat;
-    
-    if ((stat(name, &filestat) >= 0) && S_ISREG(filestat.st_mode)) {
-        if ((fd = open(name, O_RDONLY)) >= 0)
-            return fd;
-    }
-    
-    return -1;
-}
-static int open_library(const char *name)
-{
-    int fd;
-    char buf[512];
-    const char **path;
-    int n;
-    
-    TRACE("[ %5d opening %s ]\n", pid, name);
-    
-    if(name == 0) return -1;
-    if(strlen(name) > 256) return -1;
-    
-    if ((name[0] == '/') && ((fd = _open_lib(name)) >= 0))
-        return fd;
-    
-    for (path = ldpaths; *path; path++) {
-        n = format_buffer(buf, sizeof(buf), "%s/%s", *path, name);
-        if (n < 0 || n >= (int)sizeof(buf)) {
-            WARN("Ignoring very long library path: %s/%s\n", *path, name);
-            continue;
-        }
-        if ((fd = _open_lib(buf)) >= 0)
-            return fd;
-    }
-    for (path = sopaths; *path; path++) {
-        n = format_buffer(buf, sizeof(buf), "%s/%s", *path, name);
-        if (n < 0 || n >= (int)sizeof(buf)) {
-            WARN("Ignoring very long library path: %s/%s\n", *path, name);
-            continue;
-        }
-        if ((fd = _open_lib(buf)) >= 0)
-            return fd;
-    }
-    
-    return -1;
-}
 
 /* temporary space for holding the first page of the shared lib
  * which contains the elf header (with the pht). */
@@ -761,7 +680,7 @@ static int alloc_mem_region(soinfo *si)
      */
     
     void *base = mmap(NULL, si->size, PROT_NONE,
-                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+                      MAP_SHARED | MAP_ANONYMOUS, -1, 0);
     if (base == MAP_FAILED) {
         DL_ERR("%5d mmap of library '%s' failed: %d (%s)\n",
                pid, si->name,
@@ -1266,7 +1185,7 @@ static int reloc_library(soinfo *si, Elf32_Rel *rel, unsigned count)
 #endif
                 sym_addr = (unsigned)(s->st_value + base);
             }
-            COUNT_RELOC(RELOC_SYMBOL);
+            // COUNT_RELOC(RELOC_SYMBOL);
         } else {
             s = NULL;
         }
@@ -1277,45 +1196,45 @@ static int reloc_library(soinfo *si, Elf32_Rel *rel, unsigned count)
         switch(type){
 #if defined(ANDROID_ARM_LINKER)
             case R_ARM_JUMP_SLOT:
-                COUNT_RELOC(RELOC_ABSOLUTE);
-                MARK(rel->r_offset);
-                TRACE_TYPE(RELO, "%5d RELO JMP_SLOT %08x <- %08x %s\n", pid,
+                // COUNT_RELOC(RELOC_ABSOLUTE);
+                // MARK(rel->r_offset);
+                DL_ERR("%5d RELO JMP_SLOT %08x <- %08x %s\n", pid,
                            reloc, sym_addr, sym_name);
                 *((unsigned*)reloc) = sym_addr;
                 break;
             case R_ARM_GLOB_DAT:
-                COUNT_RELOC(RELOC_ABSOLUTE);
-                MARK(rel->r_offset);
-                TRACE_TYPE(RELO, "%5d RELO GLOB_DAT %08x <- %08x %s\n", pid,
+                // COUNT_RELOC(RELOC_ABSOLUTE);
+                // MARK(rel->r_offset);
+                DL_ERR("%5d RELO GLOB_DAT %08x <- %08x %s\n", pid,
                            reloc, sym_addr, sym_name);
                 *((unsigned*)reloc) = sym_addr;
                 break;
             case R_ARM_ABS32:
-                COUNT_RELOC(RELOC_ABSOLUTE);
-                MARK(rel->r_offset);
-                TRACE_TYPE(RELO, "%5d RELO ABS %08x <- %08x %s\n", pid,
+                // COUNT_RELOC(RELOC_ABSOLUTE);
+                // MARK(rel->r_offset);
+                DL_ERR("%5d RELO ABS %08x <- %08x %s\n", pid,
                            reloc, sym_addr, sym_name);
                 *((unsigned*)reloc) += sym_addr;
                 break;
             case R_ARM_REL32:
-                COUNT_RELOC(RELOC_RELATIVE);
-                MARK(rel->r_offset);
-                TRACE_TYPE(RELO, "%5d RELO REL32 %08x <- %08x - %08x %s\n", pid,
+                // COUNT_RELOC(RELOC_RELATIVE);
+                // MARK(rel->r_offset);
+                DL_ERR("%5d RELO REL32 %08x <- %08x - %08x %s\n", pid,
                            reloc, sym_addr, rel->r_offset, sym_name);
                 *((unsigned*)reloc) += sym_addr - rel->r_offset;
                 break;
 #elif defined(ANDROID_X86_LINKER)
             case R_386_JUMP_SLOT:
-                COUNT_RELOC(RELOC_ABSOLUTE);
-                MARK(rel->r_offset);
-                TRACE_TYPE(RELO, "%5d RELO JMP_SLOT %08x <- %08x %s\n", pid,
+                // COUNT_RELOC(RELOC_ABSOLUTE);
+                // MARK(rel->r_offset);
+                DL_ERR("%5d RELO JMP_SLOT %08x <- %08x %s\n", pid,
                            reloc, sym_addr, sym_name);
                 *((unsigned*)reloc) = sym_addr;
                 break;
             case R_386_GLOB_DAT:
-                COUNT_RELOC(RELOC_ABSOLUTE);
-                MARK(rel->r_offset);
-                TRACE_TYPE(RELO, "%5d RELO GLOB_DAT %08x <- %08x %s\n", pid,
+                // COUNT_RELOC(RELOC_ABSOLUTE);
+                // MARK(rel->r_offset);
+                DL_ERR( "%5d RELO GLOB_DAT %08x <- %08x %s\n", pid,
                            reloc, sym_addr, sym_name);
                 *((unsigned*)reloc) = sym_addr;
                 break;
@@ -1326,31 +1245,31 @@ static int reloc_library(soinfo *si, Elf32_Rel *rel, unsigned count)
 #elif defined(ANDROID_X86_LINKER)
             case R_386_RELATIVE:
 #endif /* ANDROID_*_LINKER */
-                COUNT_RELOC(RELOC_RELATIVE);
-                MARK(rel->r_offset);
+                // COUNT_RELOC(RELOC_RELATIVE);
+                // MARK(rel->r_offset);
                 if(sym){
                     DL_ERR("%5d odd RELATIVE form...", pid);
                     return -1;
                 }
-                TRACE_TYPE(RELO, "%5d RELO RELATIVE %08x <- +%08x\n", pid,
+                DL_ERR("%5d RELO RELATIVE %08x <- +%08x\n", pid,
                            reloc, si->base);
                 *((unsigned*)reloc) += si->base;
                 break;
                 
 #if defined(ANDROID_X86_LINKER)
             case R_386_32:
-                COUNT_RELOC(RELOC_RELATIVE);
-                MARK(rel->r_offset);
+                // COUNT_RELOC(RELOC_RELATIVE);
+                // MARK(rel->r_offset);
                 
-                TRACE_TYPE(RELO, "%5d RELO R_386_32 %08x <- +%08x %s\n", pid,
+                DL_ERR("%5d RELO R_386_32 %08x <- +%08x %s\n", pid,
                            reloc, sym_addr, sym_name);
                 *((unsigned *)reloc) += (unsigned)sym_addr;
                 break;
                 
             case R_386_PC32:
-                COUNT_RELOC(RELOC_RELATIVE);
-                MARK(rel->r_offset);
-                TRACE_TYPE(RELO, "%5d RELO R_386_PC32 %08x <- "
+                // COUNT_RELOC(RELOC_RELATIVE);
+                // MARK(rel->r_offset);
+                DL_ERR("%5d RELO R_386_PC32 %08x <- "
                            "+%08x (%08x - %08x) %s\n", pid, reloc,
                            (sym_addr - reloc), sym_addr, reloc, sym_name);
                 *((unsigned *)reloc) += (unsigned)(sym_addr - reloc);
@@ -1359,9 +1278,9 @@ static int reloc_library(soinfo *si, Elf32_Rel *rel, unsigned count)
                 
 #ifdef ANDROID_ARM_LINKER
             case R_ARM_COPY:
-                COUNT_RELOC(RELOC_COPY);
-                MARK(rel->r_offset);
-                TRACE_TYPE(RELO, "%5d RELO %08x <- %d @ %08x %s\n", pid,
+                // COUNT_RELOC(RELOC_COPY);
+                // MARK(rel->r_offset);
+                DL_ERR("%5d RELO %08x <- %d @ %08x %s\n", pid,
                            reloc, s->st_size, sym_addr, sym_name);
                 memcpy((void*)reloc, (void*)sym_addr, s->st_size);
                 break;
@@ -1661,9 +1580,9 @@ static int link_image(soinfo *si, unsigned wr_offset)
         for(i = 0; ldpreload_names[i] != NULL; i++) {
             soinfo *lsi = find_library(ldpreload_names[i]);
             if(lsi == 0) {
-                strlcpy(tmp_err_buf, linker_get_error(), sizeof(tmp_err_buf));
-                DL_ERR("%5d could not load needed library '%s' for '%s' (%s)",
-                       pid, ldpreload_names[i], si->name, tmp_err_buf);
+                // strlcpy(tmp_err_buf, linker_get_error(), sizeof(tmp_err_buf));
+                DL_ERR("%5d could not load needed library '%s' for '%s' ()",
+                       pid, ldpreload_names[i], si->name);
                 goto fail;
             }
             lsi->refcount++;
@@ -1676,9 +1595,9 @@ static int link_image(soinfo *si, unsigned wr_offset)
             DEBUG("%5d %s needs %s\n", pid, si->name, si->strtab + d[1]);
             soinfo *lsi = (soinfo*)find_library(si->strtab + d[1]);
             if(lsi == 0) {
-                strlcpy(tmp_err_buf, linker_get_error(), sizeof(tmp_err_buf));
-                DL_ERR("%5d could not load needed library '%s' for '%s' (%s)",
-                       pid, si->strtab + d[1], si->name, tmp_err_buf);
+                // strlcpy(tmp_err_buf, linker_get_error(), sizeof(tmp_err_buf));
+                DL_ERR("%5d could not load needed library '%s' for '%s' ()",
+                       pid, si->strtab + d[1], si->name);
                 goto fail;
             }
          
@@ -1728,35 +1647,6 @@ fail:
     ERROR("failed to link %s\n", si->name);
     si->flags |= FLAG_ERROR;
     return -1;
-}
-void *custom_dlopen(const char *filename, int flag)
-{
-    soinfo *ret;
-    ret = find_library(filename);
-    if (unlikely(ret == NULL)) {
-        TRACE("FAIL");
-        set_dlerror(DL_ERR_CANNOT_LOAD_LIBRARY);
-    } else {
-        call_constructors_recursive(ret);
-        ret->refcount++;
-    }
-    return ret;
-}
-JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved){
-    soinfo *si;
-    DL_ERR("load start\n");
-    si = (soinfo *)gbdlopen("/data/local/tmp/libfoo.so",RTLD_NOW);
-    if(si!=NULL){
-        DL_ERR("success");
-    }
-    // xor_code(si->base);
-    jint (*real_JNI_OnLoad)(JavaVM*, void*);
-    real_JNI_OnLoad = (jint (*)(JavaVM*, void*))(gbdlsym(si,"JNI_OnLoad"));
-    if(real_JNI_OnLoad == NULL){
-     DL_ERR("cannot find sym %s\n", "JNI_OnLoad");
-    }
-    return real_JNI_OnLoad(vm, reserved);
-    // return JNI_VERSION_1_4;
 }
 
 

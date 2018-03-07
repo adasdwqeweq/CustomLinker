@@ -32,7 +32,7 @@ typedef struct {
     void       *dli_saddr;  /* Exact address of symbol named
                                in dli_sname */
 } Dl_info;
-static char dl_err_buf[1024];
+// static char dl_err_buf[1024];
 static const char *dl_err_str;
 // enum {
 //   RTLD_NOW  = 0,
@@ -56,10 +56,10 @@ pthread_mutex_t dl_lock = PTHREAD_RECURSIVE_MUTEX_INITIALIZER;
 
 static void set_dlerror(int err)
 {
-    format_buffer(dl_err_buf, sizeof(dl_err_buf), "%s: %s", dl_errors[err],
-                  linker_get_error());
-    dl_err_str = (const char *)&dl_err_buf[0];
-    TRACE("ERROR %s\n",dl_err_str);
+    // format_buffer(dl_err_buf, sizeof(dl_err_buf), "%s: %s", dl_errors[err],
+    //               linker_get_error());
+    // dl_err_str = (const char *)&dl_err_buf[0];
+    // TRACE("ERROR %s\n",dl_err_str);
 };
 
 void *gbdlopen(const char *filename, int flag)
